@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Markdown-Converter</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Markdown-Converter</h1>
+      <p class="tagline">Convert documents to Markdown.</p>
+      <p class="privacy-banner">
+        Runs fully on your machine. No files leave this computer.
+      </p>
+    </header>
+
+    <section
+      id="dropzone"
+      class="dropzone"
+      tabindex="0"
+      role="button"
+      aria-label="Drop files here or click to browse"
+    >
+      <p class="dropzone-text">Drop files here, or <span class="link">click to browse</span></p>
+      <p id="accepted-types" class="accepted-types"></p>
+      <input id="file-input" type="file" multiple hidden />
+    </section>
+
+    <section id="results" class="results" aria-live="polite"></section>
+  </main>
+
+  <template id="result-row-template">
+    <article class="result-row">
+      <div class="result-head">
+        <span class="result-name"></span>
+        <span class="result-status"></span>
+      </div>
+      <p class="result-error" hidden></p>
+      <p class="result-warnings" hidden></p>
+      <div class="result-body" hidden>
+        <div class="result-actions">
+          <button class="btn copy-btn" type="button">Copy</button>
+          <button class="btn download-btn" type="button">Download .md</button>
+        </div>
+        <textarea class="result-markdown" readonly spellcheck="false"></textarea>
+      </div>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
