@@ -1,21 +1,26 @@
-"""Text-based PDF -> Markdown converter, backed by Microsoft MarkItDown.
+"""PDF -> Markdown converter, backed by Microsoft MarkItDown.
 
 MarkItDown is MIT-licensed and runs fully locally for text documents. We
 deliberately construct it with **no LLM client and no API key**, so there is
 never any network egress during conversion — a hard requirement for sensitive
 Ministry of Finance documents.
+
+If a PDF has no selectable text (i.e. it is scanned / image-only), this
+converter automatically falls back to local OCR (see :mod:`app.converters.ocr`)
+so the user still gets Markdown back without doing anything special.
 """
 
 from __future__ import annotations
 
 import io
 
+from app.converters import ocr
 from app.converters.base import ConversionResult
 from app.errors import ConversionError
 
 
 class PdfTextConverter:
-    name = "pdf-text"
+    name = "pdf"
     extensions = (".pdf",)
     mime_types = ("application/pdf",)
     implemented = True
@@ -51,11 +56,12 @@ class PdfTextConverter:
 
         markdown = (result.text_content or "").strip()
         if not markdown:
-            # A text extractor returning nothing almost always means the PDF is
-            # scanned/image-only and needs OCR (a planned, separate converter).
-            raise ConversionError(
-                f"No selectable text found in '{filename}'. This looks like a "
-                "scanned or image-only PDF, which needs OCR (coming soon)."
+            # No selectable text => scanned / image-only PDF. Fall back to local
+            # OCR so the user still gets Markdown back automatically.
+            markdown = ocr.ocr_pdf(data, filename)
+            warnings.append(
+                "No selectable text was found, so this PDF was read with OCR. "
+                "Please double-check the result for accuracy."
             )
 
         metadata = {}

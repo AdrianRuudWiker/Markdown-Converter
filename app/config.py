@@ -35,7 +35,14 @@ class Settings:
     #: Max number of files accepted in a single batch request.
     max_batch_files: int = _int_env("MDC_MAX_BATCH_FILES", 50)
 
-    version: str = "1.0.0"
+    #: OCR language(s) for scanned PDFs (Tesseract codes, '+'-separated).
+    #: Defaults to Norwegian + English for Ministry of Finance documents.
+    ocr_lang: str = os.environ.get("MDC_OCR_LANG", "nor+eng")
+
+    #: Rendering resolution (DPI) used before OCR. Higher = slower but sharper.
+    ocr_dpi: int = _int_env("MDC_OCR_DPI", 300)
+
+    version: str = "1.1.0"
 
 
 settings = Settings()

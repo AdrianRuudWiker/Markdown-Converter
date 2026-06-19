@@ -16,12 +16,12 @@ def test_health():
     assert resp.json()["status"] == "ok"
 
 
-def test_formats_lists_pdf_and_planned():
+def test_formats_lists_supported_types():
     resp = client.get("/api/formats")
     assert resp.status_code == 200
     names = {f["name"]: f for f in resp.json()}
-    assert names["pdf-text"]["implemented"] is True
-    assert names["word"]["implemented"] is False
+    for fmt in ("pdf", "word", "excel", "powerpoint", "html"):
+        assert names[fmt]["implemented"] is True
 
 
 def test_convert_pdf_ok(sample_pdf_bytes):
@@ -43,19 +43,20 @@ def test_convert_unsupported_type():
     assert resp.status_code == 415
 
 
-def test_convert_stub_returns_501():
+def test_convert_docx_ok(docx_bytes):
     resp = client.post(
         "/api/convert",
         files={
             "file": (
-                "memo.docx",
-                b"PK fake docx",
+                "sample.docx",
+                docx_bytes,
                 "application/vnd.openxmlformats-officedocument."
                 "wordprocessingml.document",
             )
         },
     )
-    assert resp.status_code == 501
+    assert resp.status_code == 200
+    assert "Quarterly Report" in resp.json()["markdown"]
 
 
 def test_convert_oversize_returns_413(monkeypatch):
