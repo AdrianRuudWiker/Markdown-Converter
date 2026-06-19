@@ -19,6 +19,8 @@ wheelhouse/
 .coverage
 
 # Editor / OS
-.vscode/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
 .idea/
 .DS_Store

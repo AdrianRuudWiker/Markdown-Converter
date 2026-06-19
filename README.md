@@ -1,5 +1,7 @@
 # Markdown-Converter
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AdrianRuudWiker/Markdown-Converter)
+
 A fully-local, drag-and-drop web app that converts documents to Markdown.
 
 Built for use with sensitive Ministry of Finance (Finansdepartementet) documents:
@@ -24,11 +26,23 @@ Built for use with sensitive Ministry of Finance (Finansdepartementet) documents
 - Converted output is never persisted server-side; the `.md` file is built in your
   browser.
 
-## Requirements
+## Run in GitHub Codespaces (easiest)
+
+1. Click the **Open in GitHub Codespaces** badge above (or, on the repo page,
+   **Code → Codespaces → Create codespace**).
+2. Wait for the Codespace to finish setting up — it installs everything for you.
+3. The app **starts automatically** and a preview of it opens on the forwarded
+   port (8000). That's it — drag a PDF in and get Markdown back.
+
+If the preview doesn't pop up, open the **Ports** tab and click the globe icon
+next to port 8000, or run the **Run Markdown-Converter** task
+(`Terminal → Run Task...`).
+
+## Requirements (local install)
 
 - Python 3.11 or newer.
 
-## Run it
+## Run it locally
 
 **macOS / Linux:**
 

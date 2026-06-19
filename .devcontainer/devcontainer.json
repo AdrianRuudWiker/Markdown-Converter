@@ -1,0 +1,17 @@
+{
+  "name": "Markdown-Converter",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "postCreateCommand": "pip install --upgrade pip && pip install -e \".[dev]\"",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "Markdown-Converter",
+      "onAutoForward": "openPreview"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "charliermarsh.ruff"]
+    }
+  }
+}
