@@ -1,0 +1,17 @@
+# Outputs
+compressed/
+*.md.bak
+
+# Inputs you don't want committed
+*.pdf
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Secrets
+.env
