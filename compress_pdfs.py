@@ -37,8 +37,21 @@ from pathlib import Path
 # claude-haiku-4-5-20251001 for lowest cost).
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
-# Roughly characters-per-token for English prose. Used only for chunk sizing.
+# Roughly characters-per-token for English prose. Used only for chunk sizing
+# and cost estimation.
 CHARS_PER_TOKEN = 4
+
+# Approximate USD price per 1M tokens (input, output). For cost estimates only;
+# these change over time, so verify current rates at anthropic.com/pricing.
+PRICING = {
+    "claude-opus-4-8": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5-20251001": (1.0, 5.0),
+}
+
+# Distilled output is assumed to be ~40% the size of the input, for estimating
+# output-token cost before we actually run.
+ASSUMED_OUTPUT_RATIO = 0.4
 
 SYSTEM_PROMPT = """\
 You are a document compressor. You distil long report sections down to their \
@@ -164,45 +177,70 @@ def distill_chunk(client, model: str, chunk: str, max_retries: int = 5) -> str:
     raise RuntimeError("unreachable")
 
 
-def process_pdf(
-    pdf_path: Path,
-    out_path: Path,
-    client,
-    model: str,
-    max_chunk_tokens: int,
-    distill: bool,
-    workers: int,
-) -> tuple[int, int]:
-    """Convert one PDF to a compressed .md. Returns (orig_bytes, out_bytes)."""
+def extract_and_chunk(pdf_path: Path, max_chunk_tokens: int) -> list[str]:
+    """Extract a PDF to image-stripped Markdown and split it into chunks."""
     import pymupdf4llm
 
     raw_md = pymupdf4llm.to_markdown(str(pdf_path), show_progress=False)
     raw_md = strip_images(raw_md)
+    return chunk_markdown(raw_md, max_chunk_tokens)
 
-    if not distill:
-        final_md = raw_md
+
+def estimate_cost(total_input_tokens: int, model: str) -> tuple[float, str]:
+    """Return (approx_usd, human_readable) for distilling the given tokens.
+
+    Output tokens are assumed to be ASSUMED_OUTPUT_RATIO of input. Pricing is
+    approximate. Unknown models return a 0 cost with a note.
+    """
+    if model not in PRICING:
+        return 0.0, f"~? (no pricing on file for {model}; verify at anthropic.com/pricing)"
+    in_rate, out_rate = PRICING[model]
+    out_tokens = total_input_tokens * ASSUMED_OUTPUT_RATIO
+    usd = (total_input_tokens * in_rate + out_tokens * out_rate) / 1_000_000
+    return usd, f"~${usd:.2f} (approx; verify at anthropic.com/pricing)"
+
+
+def distill_chunks(chunks: list[str], client, model: str, workers: int, progress) -> str:
+    """Distil all chunks (optionally in parallel) and reassemble in order."""
+    results: list[str] = [""] * len(chunks)
+
+    def work(idx_chunk):
+        idx, chunk = idx_chunk
+        out = distill_chunk(client, model, chunk)
+        if progress is not None:
+            progress.update(1)
+        return idx, out
+
+    if workers > 1 and len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for idx, distilled in ex.map(work, enumerate(chunks)):
+                results[idx] = distilled
     else:
-        chunks = chunk_markdown(raw_md, max_chunk_tokens)
-        results: list[str] = [""] * len(chunks)
+        for pair in enumerate(chunks):
+            idx, distilled = work(pair)
+            results[idx] = distilled
 
-        def work(idx_chunk):
-            idx, chunk = idx_chunk
-            return idx, distill_chunk(client, model, chunk)
+    return ("\n\n".join(r for r in results if r)).strip() + "\n"
 
-        if workers > 1 and len(chunks) > 1:
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                for idx, distilled in ex.map(work, enumerate(chunks)):
-                    results[idx] = distilled
-        else:
-            for idx, chunk in enumerate(chunks):
-                results[idx] = distill_chunk(client, model, chunk)
 
-        final_md = ("\n\n".join(r for r in results if r)).strip() + "\n"
+class _NullBar:
+    """Minimal stand-in for tqdm when it isn't installed."""
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(final_md, encoding="utf-8")
+    def __init__(self, iterable=None, **kwargs):
+        self._it = iterable
 
-    return pdf_path.stat().st_size, out_path.stat().st_size
+    def __iter__(self):
+        return iter(self._it or [])
+
+    def update(self, n=1):
+        pass
+
+    def close(self):
+        pass
+
+    @staticmethod
+    def write(msg):
+        print(msg)
 
 
 def human(n: int) -> str:
@@ -229,7 +267,15 @@ def main() -> None:
                         help="Parallel API requests per document (default: 4).")
     parser.add_argument("--no-distill", action="store_true",
                         help="Skip the AI step: extract text+tables to Markdown only (no API key needed).")
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="Skip the cost-estimate confirmation prompt.")
     args = parser.parse_args()
+
+    # tqdm is optional; degrade gracefully to a no-op bar if not installed.
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        tqdm = _NullBar
 
     client = None
     if not args.no_distill:
@@ -247,22 +293,58 @@ def main() -> None:
         print(f"Found {len(pdfs)} PDF(s). Mode: "
               f"{'extract-only' if args.no_distill else f'AI distillation ({args.model})'}\n")
 
-        total_in = total_out = 0
-        for i, pdf in enumerate(pdfs, 1):
-            out_path = args.output / (pdf.stem + ".md")
-            print(f"[{i}/{len(pdfs)}] {pdf.name}")
+        # Phase 1: extract + chunk every PDF (local, cheap), keeping originals.
+        jobs = []  # (pdf, out_path, chunks, orig_size)
+        total_chunks = 0
+        total_input_tokens = 0
+        for pdf in tqdm(pdfs, desc="Extracting", unit="pdf"):
             try:
-                orig, comp = process_pdf(
-                    pdf, out_path, client, args.model,
-                    args.max_chunk_tokens, not args.no_distill, args.workers,
-                )
+                chunks = extract_and_chunk(pdf, args.max_chunk_tokens)
             except Exception as e:  # noqa: BLE001 - keep going on a bad file
-                print(f"    FAILED: {e}", file=sys.stderr)
+                print(f"  FAILED to read {pdf.name}: {e}", file=sys.stderr)
+                continue
+            out_path = args.output / (pdf.stem + ".md")
+            jobs.append((pdf, out_path, chunks, pdf.stat().st_size))
+            total_chunks += len(chunks)
+            total_input_tokens += sum(estimate_tokens(c) for c in chunks)
+
+        if not jobs:
+            sys.exit("No PDFs could be read.")
+
+        # Cost estimate + confirmation (distill mode only).
+        if not args.no_distill:
+            _, cost_str = estimate_cost(total_input_tokens, args.model)
+            print(f"\n{len(jobs)} document(s), {total_chunks} chunk(s), "
+                  f"~{total_input_tokens:,} input tokens.")
+            print(f"Estimated API cost: {cost_str}\n")
+            if not args.yes:
+                reply = input("Proceed with the AI distillation? [y/N] ").strip().lower()
+                if reply not in ("y", "yes"):
+                    sys.exit("Aborted before any API calls were made.")
+
+        # Phase 2: distill (or just write, in extract-only mode) + report sizes.
+        total_in = total_out = 0
+        bar = tqdm(total=total_chunks, desc="Distilling", unit="chunk") \
+            if not args.no_distill else None
+        for pdf, out_path, chunks, orig in jobs:
+            try:
+                if args.no_distill:
+                    final_md = ("\n\n".join(chunks)).strip() + "\n"
+                else:
+                    final_md = distill_chunks(chunks, client, args.model, args.workers, bar)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(final_md, encoding="utf-8")
+                comp = out_path.stat().st_size
+            except Exception as e:  # noqa: BLE001 - keep going on a bad file
+                print(f"\n  FAILED on {pdf.name}: {e}", file=sys.stderr)
                 continue
             total_in += orig
             total_out += comp
             ratio = (orig / comp) if comp else 0
-            print(f"    {human(orig)} -> {human(comp)}  ({ratio:.0f}x smaller)  -> {out_path}")
+            tqdm.write(f"  {pdf.name}: {human(orig)} -> {human(comp)} "
+                       f"({ratio:.0f}x)  -> {out_path}")
+        if bar is not None:
+            bar.close()
 
         print(f"\nDone. Total: {human(total_in)} -> {human(total_out)}", end="")
         if total_out:

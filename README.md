@@ -51,6 +51,15 @@ printed at the end.
 | `--max-chunk-tokens` | `6000` | Approx tokens per chunk sent to the model. |
 | `--workers` | `4` | Parallel API requests per document. |
 | `--no-distill` | off | Skip AI: just extract text + tables to Markdown. **No API key needed.** Fully lossless on text, big size win, no summarizing. |
+| `-y, --yes` | off | Skip the cost-estimate confirmation prompt (for unattended runs). |
+
+### Cost estimate before it runs
+
+Before any API calls, the tool extracts everything locally, then prints how
+many documents, chunks and input tokens it found and an **approximate USD
+cost**, and waits for you to confirm. Nothing is sent to the API until you say
+yes (or you pass `-y`). Pricing is approximate — verify current rates at
+anthropic.com/pricing.
 
 ### Tip: try one first
 
